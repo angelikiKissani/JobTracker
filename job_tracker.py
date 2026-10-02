@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 job_tracker_cloud.py
-Reads job-related emails from iCloud Mail (IMAP) and adds or updates rows
-in a Google Sheets job-application tracker. Built to run on GitHub Actions.
+Reads job-related emails from iCloud Mail (IMAP) and updates the
+"Job Applications Tracker" Google Sheet. Built to run on GitHub Actions.
 
 Required environment variables (set as GitHub repository secrets):
     ICLOUD_EMAIL                  your iCloud address
@@ -10,7 +10,13 @@ Required environment variables (set as GitHub repository secrets):
     GOOGLE_SERVICE_ACCOUNT_JSON   full contents of the service-account key file
     SPREADSHEET_ID                the ID from your Google Sheet's URL
 
-Progress is stored in a hidden tab called "_tracker_state" in the same sheet.
+What it does:
+  - New application -> fills the first blank row in "Tracker"
+    (Company, Title, Status, Application Date).
+  - Status change -> updates Status, logs it in "StatusHistory" and keeps
+    "_StatusTracker" in sync, like the template does for manual edits.
+  - Never touches Application Week, Notes, links or other columns.
+Progress is stored in a hidden tab called "_tracker_state".
 The mailbox is opened read-only, so emails are NOT marked as read.
 """
 
@@ -24,35 +30,33 @@ from datetime import datetime, timedelta
 from email.header import decode_header, make_header
 from email.utils import parseaddr, parsedate_to_datetime
 from html import unescape
+from zoneinfo import ZoneInfo
 
 import gspread
 
-# ======================= SETTINGS (edit these) =======================
-SHEET_NAME = "Applications"            # tab name; falls back to the first tab
-STATE_TAB = "_tracker_state"           # hidden tab where progress is stored
+# ======================= SETTINGS =======================
+SHEET_NAME = "Tracker"
+HISTORY_TAB = "StatusHistory"
+MIRROR_TAB = "_StatusTracker"
+STATE_TAB = "_tracker_state"
+TIMEZONE = ZoneInfo("Europe/Athens")
 IMAP_SERVER = "imap.mail.me.com"
 IMAP_PORT = 993
 MAILBOX = "INBOX"
-DAYS_BACK_FIRST_RUN = 30               # how far back to look the first time
-MAX_PER_RUN = 300                      # emails checked per run (rest next run)
+DAYS_BACK_FIRST_RUN = 30
+MAX_PER_RUN = 300
 
-# Column headers in your sheet. Rename the right-hand side to match yours;
-# any header that doesn't exist yet is added to row 1.
 COLUMNS = {
-    "date": "Date Applied",
     "company": "Company",
-    "role": "Role",
+    "role": "Title",
     "status": "Status",
-    "updated": "Last Update",
-    "subject": "Last Email Subject",
-    "sender": "Sender",
+    "date": "Application Date",
 }
 
-# An email must contain at least one of these to count as job-related.
 JOB_WORDS = ["application", "applying", "applied", "candidacy", "candidate",
              "interview", "position", "recruit", "hiring"]
 
-# Status rules, checked top to bottom; first match wins.
+# Checked top to bottom; first match wins.
 # (status, phrases matched anywhere, phrases matched in the subject only)
 STATUS_RULES = [
     ("Rejected", ["unfortunately", "not to move forward", "not moving forward",
@@ -62,29 +66,35 @@ STATUS_RULES = [
     ("Offer", ["pleased to offer", "offer letter", "job offer",
                "extend an offer", "offer of employment"], []),
     ("Interview", ["invite you to an interview", "invite you to interview",
-                   "schedule an interview", "schedule a call", "schedule a time",
-                   "phone screen", "like to speak with you", "next round",
-                   "move forward with your application"], ["interview"]),
+                   "schedule an interview", "technical interview",
+                   "next round", "interview invitation"], ["interview"]),
+    ("Recruiter Screen", ["phone screen", "schedule a call", "quick call",
+                          "introductory call", "intro call", "recruiter call",
+                          "like to speak with you", "schedule a time",
+                          "move forward with your application"], []),
     ("Applied", ["application received", "thank you for applying",
                  "thanks for applying", "received your application",
                  "your application", "application for", "applied for",
                  "candidacy"], []),
 ]
-STATUS_RANK = {"Applied": 1, "Interview": 2, "Offer": 3, "Rejected": 3}
 
-# Senders on these domains are job platforms or personal mail, so the
-# company name is taken from the subject or sender name instead.
+# Higher rank wins; an email never moves a job "backwards".
+STATUS_RANK = {"": 0, "Pending": 0, "Ghosted": 0, "Applied": 1,
+               "Recruiter Screen": 2, "Interview": 3, "Offer": 4,
+               "Rejected": 4, "Dropped": 5}
+
 GENERIC_DOMAINS = [
     "greenhouse.io", "greenhouse-mail.io", "lever.co", "myworkday.com",
     "workday.com", "smartrecruiters.com", "icims.com", "ashbyhq.com",
     "workable.com", "workablemail.com", "teamtailor.com", "teamtailor-mail.com",
     "bamboohr.com", "jobvite.com", "recruitee.com", "personio.de",
     "personio.com", "successfactors.com", "taleo.net", "linkedin.com",
-    "indeed.com", "glassdoor.com", "kariera.gr", "skywalker.gr",
-    "gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com",
-    "me.com",
+    "indeed.com", "indeedemail.com", "glassdoor.com", "kariera.gr",
+    "karieragroup.com", "skywalker.gr", "jobfind.gr", "smartcv.co",
+    "himalayas.app", "gmail.com", "outlook.com", "hotmail.com", "yahoo.com",
+    "icloud.com", "me.com",
 ]
-# =====================================================================
+# ========================================================
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -195,12 +205,15 @@ def guess_role(subject):
     return None
 
 
-def email_date(msg):
+def email_datetime(msg):
     try:
-        dt = parsedate_to_datetime(msg["Date"])
+        return parsedate_to_datetime(msg["Date"]).astimezone(TIMEZONE)
     except Exception:
-        dt = datetime.now()
-    return dt.strftime("%Y-%m-%d")
+        return datetime.now(TIMEZONE)
+
+
+def stamp(dt):
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ------------------------- google sheet --------------------------------
@@ -211,10 +224,16 @@ def google_client():
     return gspread.service_account_from_dict(json.loads(raw))
 
 
-def load_state(sh):
+def optional_tab(sh, name):
     try:
-        ws = sh.worksheet(STATE_TAB)
+        return sh.worksheet(name)
     except gspread.WorksheetNotFound:
+        return None
+
+
+def load_state(sh):
+    ws = optional_tab(sh, STATE_TAB)
+    if ws is None:
         ws = sh.add_worksheet(title=STATE_TAB, rows=5, cols=2)
         try:
             ws.hide()
@@ -230,51 +249,39 @@ def save_state(ws, last_uid, uidvalidity):
 
 
 class Tracker:
-    """Loads the sheet once, edits it in memory, then writes changes in bulk."""
+    """Loads the Tracker tab once, edits it in memory, writes changes in bulk."""
 
     def __init__(self, sh):
-        try:
-            self.ws = sh.worksheet(SHEET_NAME)
-        except gspread.WorksheetNotFound:
-            self.ws = sh.sheet1
+        self.ws = sh.worksheet(SHEET_NAME)
+        self.history_ws = optional_tab(sh, HISTORY_TAB)
+        self.mirror_ws = optional_tab(sh, MIRROR_TAB)
 
-        self.rows = self.ws.get_all_values() or [[]]
-        header = self.rows[0]
-        existing = {h.strip(): i for i, h in enumerate(header) if h.strip()}
-        next_idx = max(existing.values(), default=-1) + 1
+        self.rows = self.ws.get_all_values()
+        header = [h.strip() for h in self.rows[0]]
         self.col = {}
-        header_changed = False
         for key, name in COLUMNS.items():
-            if name in existing:
-                self.col[key] = existing[name]
-            else:
-                while len(header) <= next_idx:
-                    header.append("")
-                header[next_idx] = name
-                self.col[key] = next_idx
-                next_idx += 1
-                header_changed = True
+            if name not in header:
+                sys.exit(f'Column "{name}" not found in the {SHEET_NAME} tab.')
+            self.col[key] = header.index(name)
 
-        self.width = max(len(header), max(self.col.values()) + 1)
+        self.width = max(len(r) for r in self.rows)
         for row in self.rows:
             row.extend([""] * (self.width - len(row)))
 
-        if header_changed:
-            if self.width > self.ws.col_count:
-                self.ws.add_cols(self.width - self.ws.col_count)
-            self.ws.update(range_name="A1", values=[self.rows[0]])
-
-        self.original_len = len(self.rows)
-        self.changes = {}
+        self.changes = {}       # (row, col) 1-based -> value, Tracker tab
+        self.mirror = {}        # (row, col) 1-based -> value, _StatusTracker
+        self.history = []       # rows for StatusHistory
 
     def get(self, r, key):
-        return self.rows[r][self.col[key]]
+        return self.rows[r][self.col[key]].strip()
 
     def set(self, r, key, value):
         value = "" if value is None else value
         self.rows[r][self.col[key]] = value
-        if r < self.original_len:
-            self.changes[(r + 1, self.col[key] + 1)] = value
+        self.changes[(r + 1, self.col[key] + 1)] = value
+
+    def is_blank(self, r):
+        return not self.get(r, "company") and not self.get(r, "role")
 
     def find_row(self, company, role):
         if not norm(company):
@@ -287,17 +294,38 @@ class Tracker:
                 return r
         return None
 
-    def add_row(self):
+    def new_row(self):
+        for r in range(1, len(self.rows)):
+            if self.is_blank(r):
+                return r
         self.rows.append([""] * self.width)
         return len(self.rows) - 1
 
+    def change_status(self, r, new_status, old_status):
+        self.set(r, "status", new_status)
+        company, role = self.get(r, "company"), self.get(r, "role")
+        self.history.append([stamp(datetime.now(TIMEZONE)), company, role,
+                             old_status, new_status])
+        for c, v in enumerate([company, role, new_status], start=1):
+            self.mirror[(r + 1, c)] = v
+
     def save(self):
         if self.changes:
+            needed = max(r for r, _ in self.changes)
+            if needed > self.ws.row_count:
+                self.ws.add_rows(needed - self.ws.row_count)
             cells = [gspread.Cell(r, c, v) for (r, c), v in self.changes.items()]
             self.ws.update_cells(cells, value_input_option="USER_ENTERED")
-        new_rows = self.rows[self.original_len:]
-        if new_rows:
-            self.ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+        if self.mirror and self.mirror_ws:
+            needed = max(r for r, _ in self.mirror)
+            if needed > self.mirror_ws.row_count:
+                self.mirror_ws.add_rows(needed - self.mirror_ws.row_count)
+            cells = [gspread.Cell(r, c, v) for (r, c), v in self.mirror.items()]
+            self.mirror_ws.update_cells(cells, value_input_option="USER_ENTERED")
+        if self.history and self.history_ws:
+            self.history_ws.append_rows(self.history,
+                                        value_input_option="USER_ENTERED",
+                                        table_range="A1")
 
 
 # ------------------------------ main ----------------------------------
@@ -353,34 +381,30 @@ def main():
 
         company = guess_company(subject, display_name, addr) or "(unknown)"
         role = guess_role(subject)
-        when = email_date(msg)
         row = tracker.find_row(company, role)
 
         if row:
             current = tracker.get(row, "status")
-            if STATUS_RANK.get(status, 0) >= STATUS_RANK.get(current, 0):
-                tracker.set(row, "status", status)
             if role and not tracker.get(row, "role"):
                 tracker.set(row, "role", role)
-            tracker.set(row, "updated", when)
-            tracker.set(row, "subject", subject)
-            updated += 1
-            print(f"Updated: {company} -> {status}")
+            if status != current and \
+                    STATUS_RANK.get(status, 0) >= STATUS_RANK.get(current, 0):
+                tracker.change_status(row, status, current)
+                updated += 1
+                print(f"Updated: {tracker.get(row, 'company')} "
+                      f"({tracker.get(row, 'role')}): {current} -> {status}")
         else:
-            row = tracker.add_row()
-            tracker.set(row, "date", when)
+            row = tracker.new_row()
             tracker.set(row, "company", company)
-            tracker.set(row, "role", role)
-            tracker.set(row, "status", status)
-            tracker.set(row, "updated", when)
-            tracker.set(row, "subject", subject)
-            tracker.set(row, "sender", addr)
+            tracker.set(row, "role", role or "(check email)")
+            tracker.set(row, "date", stamp(email_datetime(msg)))
+            tracker.change_status(row, status, "")
             added += 1
             print(f"Added:   {company} ({role or 'role unknown'}) -> {status}")
 
     imap.logout()
 
-    if added or updated:
+    if tracker.changes:
         tracker.save()
     save_state(state_ws, last_uid, uidvalidity)
     print(f"Done. {added} added, {updated} updated.")
