@@ -330,8 +330,13 @@ class Tracker:
 
 # ------------------------------ main ----------------------------------
 def main():
-    user = os.environ.get("ICLOUD_EMAIL")
-    password = os.environ.get("ICLOUD_APP_PASSWORD")
+
+    user = (os.environ.get("ICLOUD_EMAIL") or "").strip()
+    password = (os.environ.get("ICLOUD_APP_PASSWORD") or "").strip().replace(" ", "")
+    print(f"Username domain: {user.split('@')[-1] if '@' in user else '(no @ - short name)'}")
+    print(f"Password length: {len(password)}")
+    
+    
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
     if not user or not password or not spreadsheet_id:
         sys.exit("Missing ICLOUD_EMAIL, ICLOUD_APP_PASSWORD or SPREADSHEET_ID secret.")
