@@ -83,6 +83,17 @@ STATUS_RANK = {"": 0, "Pending": 0, "Ghosted": 0, "Applied": 1,
                "Recruiter Screen": 2, "Interview": 3, "Offer": 4,
                "Rejected": 4, "Dropped": 5}
 
+# Names that should count as the same company as a name in your sheet.
+# Left side: what appears in emails (e.g. the email domain), right side:
+# the name used in your sheet.
+COMPANY_ALIASES = {
+    "eurodyn": "European Dynamics",
+}
+
+# If an email comes from a person listed in one of these columns,
+# it is matched to that row (e.g. your interviewer at a company).
+PEOPLE_COLUMNS = ["Contact", "Interviewer"]
+
 GENERIC_DOMAINS = [
     "greenhouse.io", "greenhouse-mail.io", "lever.co", "myworkday.com",
     "workday.com", "smartrecruiters.com", "icims.com", "ashbyhq.com",
@@ -132,8 +143,11 @@ def get_body(msg):
         payload = part.get_payload(decode=True)
         if payload is None:
             continue
-        text = payload.decode(part.get_content_charset() or "utf-8",
-                              errors="replace")
+        try:
+            text = payload.decode(part.get_content_charset() or "utf-8",
+                                  errors="replace")
+        except LookupError:  # unknown/unusual encoding name
+            text = payload.decode("utf-8", errors="replace")
         if part.get_content_type() == "text/plain":
             plain.append(text)
         elif part.get_content_type() == "text/html":
@@ -180,7 +194,20 @@ def clean_display_name(name):
     return " ".join(name.split())
 
 
+def apply_alias(company):
+    if not company:
+        return company
+    for alias, real in COMPANY_ALIASES.items():
+        if norm(alias) == norm(company):
+            return real
+    return company
+
+
 def guess_company(subject, display_name, addr):
+    return apply_alias(_guess_company(subject, display_name, addr))
+
+
+def _guess_company(subject, display_name, addr):
     company = domain_company(addr)
     if company:
         return company
@@ -264,6 +291,7 @@ class Tracker:
                 sys.exit(f'Column "{name}" not found in the {SHEET_NAME} tab.')
             self.col[key] = header.index(name)
 
+        self.people_cols = [header.index(c) for c in PEOPLE_COLUMNS if c in header]
         self.width = max(len(r) for r in self.rows)
         for row in self.rows:
             row.extend([""] * (self.width - len(row)))
@@ -292,6 +320,18 @@ class Tracker:
                 if role and existing_role and norm(role) != norm(existing_role):
                     continue
                 return r
+        return None
+
+    def find_by_person(self, display_name, addr):
+        name, addr = norm(display_name), (addr or "").lower()
+        for r in range(len(self.rows) - 1, 0, -1):
+            for c in self.people_cols:
+                cell = self.rows[r][c]
+                if not cell.strip():
+                    continue
+                if (len(name) >= 5 and norm(cell) == name) or \
+                        (addr and addr in cell.lower()):
+                    return r
         return None
 
     def new_row(self):
@@ -330,13 +370,8 @@ class Tracker:
 
 # ------------------------------ main ----------------------------------
 def main():
-
     user = (os.environ.get("ICLOUD_EMAIL") or "").strip()
     password = (os.environ.get("ICLOUD_APP_PASSWORD") or "").strip().replace(" ", "")
-    print(f"Username domain: {user.split('@')[-1] if '@' in user else '(no @ - short name)'}")
-    print(f"Password length: {len(password)}")
-    
-    
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
     if not user or not password or not spreadsheet_id:
         sys.exit("Missing ICLOUD_EMAIL, ICLOUD_APP_PASSWORD or SPREADSHEET_ID secret.")
@@ -386,7 +421,8 @@ def main():
 
         company = guess_company(subject, display_name, addr) or "(unknown)"
         role = guess_role(subject)
-        row = tracker.find_row(company, role)
+        row = tracker.find_by_person(display_name, addr) or \
+            tracker.find_row(company, role)
 
         if row:
             current = tracker.get(row, "status")
