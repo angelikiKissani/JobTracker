@@ -72,7 +72,9 @@ STATUS_RULES = [
                           "introductory call", "intro call", "recruiter call",
                           "like to speak with you", "schedule a time",
                           "move forward with your application"], []),
-    ("Applied", ["application received", "thank you for applying",
+    ("Applied", ["application received", "application submitted",
+                 "submitted successfully", "submitting your application",
+                 "thank you for applying",
                  "thanks for applying", "received your application",
                  "your application", "application for", "applied for",
                  "candidacy"], []),
@@ -203,11 +205,35 @@ def apply_alias(company):
     return company
 
 
-def guess_company(subject, display_name, addr):
-    return apply_alias(_guess_company(subject, display_name, addr))
+# Sender names of job platforms; never treated as the company.
+PLATFORM_NAMES = ["indeed", "indeed apply", "workable", "linkedin",
+                  "linkedin jobs", "greenhouse", "lever", "smartrecruiters",
+                  "teamtailor", "glassdoor", "kariera", "skywalker", "jobfind"]
+
+SKIP_SUBJECT_WORDS = ("thank", "application", "applying", "applied", "your",
+                      "interview", "update", "invitation", "regarding", "re:")
 
 
-def _guess_company(subject, display_name, addr):
+def flat(text):
+    return " ".join((text or "").split())
+
+
+def subject_dash_split(subject):
+    """'Python Developer - Satori Analytics' -> ('Python Developer', 'Satori Analytics')"""
+    m = re.match(r"^\s*(.{3,80}?)\s+[-–|]\s+(.{2,60}?)\s*$", subject)
+    if not m:
+        return None, None
+    left, right = m.group(1).strip(), m.group(2).strip()
+    if any(w in left.lower() for w in SKIP_SUBJECT_WORDS):
+        return None, None
+    return left, right
+
+
+def guess_company(subject, display_name, addr, body=""):
+    return apply_alias(_guess_company(subject, display_name, addr, body))
+
+
+def _guess_company(subject, display_name, addr, body=""):
     company = domain_company(addr)
     if company:
         return company
@@ -216,10 +242,26 @@ def _guess_company(subject, display_name, addr):
                       subject)
         if m:
             return m.group(1).strip()
-    return clean_display_name(display_name) or None
+    _, right = subject_dash_split(subject)
+    if right:
+        return right
+    m = re.search(r"\b(?:were sent to|was sent to|submitted to|sent to)\s+"
+                  r"([A-Z][\w&.'’ ]{1,40}?)\s*[.!,]", flat(body)[:5000])
+    if m:
+        return m.group(1).strip()
+    name = clean_display_name(display_name)
+    if name and name.lower() not in PLATFORM_NAMES:
+        return name
+    return None
 
 
-def guess_role(subject):
+def guess_role(subject, body=""):
+    m = re.match(r"^\s*indeed application:\s*(.{3,80})$", subject, flags=re.I)
+    if m:
+        return m.group(1).strip()
+    left, _ = subject_dash_split(subject)
+    if left:
+        return left
     patterns = [
         r"(?:for|as)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:position|role|job|opening)\b",
         r"application(?:\s+\w+)?\s+for\s+(?:the\s+)?(.+?)(?:\s+(?:at|with)\s+|\s+[-–|]\s+|$)",
@@ -229,6 +271,14 @@ def guess_role(subject):
         m = re.search(p, subject, flags=re.I)
         if m and 2 < len(m.group(1)) < 80:
             return m.group(1).strip(" -–|:")
+    text = flat(body)[:5000]
+    for p in [r"application (?:for|to) (?:the |our )?([A-Z][^.\n]{2,60}?) "
+              r"(?:job|position|role|opening)\b",
+              r"applying (?:for|to) (?:the |our )?([A-Z][^.\n]{2,60}?) "
+              r"(?:job|position|role|opening)\b"]:
+        m = re.search(p, text)
+        if m:
+            return m.group(1).strip()
     return None
 
 
@@ -317,6 +367,8 @@ class Tracker:
         for r in range(len(self.rows) - 1, 0, -1):
             if same_company(self.get(r, "company"), company):
                 existing_role = self.get(r, "role")
+                if existing_role == "(check email)":
+                    existing_role = ""
                 if role and existing_role and norm(role) != norm(existing_role):
                     continue
                 return r
@@ -420,14 +472,14 @@ def main():
         if not status:
             continue
 
-        company = guess_company(subject, display_name, addr) or "(unknown)"
-        role = guess_role(subject)
+        company = guess_company(subject, display_name, addr, body) or "(unknown)"
+        role = guess_role(subject, body)
         row = tracker.find_by_person(display_name, addr) or \
             tracker.find_row(company, role)
 
         if row:
             current = tracker.get(row, "status")
-            if role and not tracker.get(row, "role"):
+            if role and tracker.get(row, "role") in ("", "(check email)"):
                 tracker.set(row, "role", role)
             if status != current and \
                     STATUS_RANK.get(status, 0) >= STATUS_RANK.get(current, 0):
