@@ -15,9 +15,13 @@ What it does:
     (Company, Title, Status, Application Date).
   - Status change -> updates Status, logs it in "StatusHistory" and keeps
     "_StatusTracker" in sync, like the template does for manual edits.
-  - Never touches Application Week, Notes, links or other columns.
+  - Fills "Job Posting Link" (if empty) with the job link found in the email.
+  - Copies every job email into an "Emails" tab, and puts a "View email"
+    link in the Tracker's "Email" column (if you add a column with that name).
+  - Never touches Application Week, Notes or other columns.
 Progress is stored in a hidden tab called "_tracker_state".
-The mailbox is opened read-only, so emails are NOT marked as read.
+Job emails are moved to the folder set in MOVE_TO_FOLDER (created if it
+doesn't exist) after the sheet has been updated. Emails are NOT marked as read.
 """
 
 import email
@@ -43,6 +47,9 @@ TIMEZONE = ZoneInfo("Europe/Athens")
 IMAP_SERVER = "imap.mail.me.com"
 IMAP_PORT = 993
 MAILBOX = "INBOX"
+# Job emails are moved here after they're recorded. Set to None to keep
+# them in the inbox.
+MOVE_TO_FOLDER = "Applications"
 DAYS_BACK_FIRST_RUN = 30
 MAX_PER_RUN = 300
 
@@ -52,6 +59,23 @@ COLUMNS = {
     "status": "Status",
     "date": "Application Date",
 }
+
+# Filled only if these headers exist in the Tracker tab.
+OPTIONAL_COLUMNS = {
+    "link": "Job Posting Link",
+    "email": "Email",
+}
+
+EMAILS_TAB = "Emails"
+EMAIL_HEADERS = ["Date", "Company", "Title", "Detected Status", "From",
+                 "Subject", "Email Text"]
+EMAIL_TEXT_LIMIT = 3000   # characters of each email kept in the sheet
+
+# Links in an email that point to a job posting on these sites.
+JOB_LINK_HINTS = ["workable.com/j/", "apply.workable.com", "indeed.com/viewjob",
+                  "indeed.com/rc/clk", "indeed.com/pagead", "linkedin.com/jobs/view",
+                  "boards.greenhouse.io", "jobs.lever.co", "smartrecruiters.com/",
+                  "teamtailor.com/jobs", "kariera.gr/jobs"]
 
 JOB_WORDS = ["application", "applying", "applied", "candidacy", "candidate",
              "interview", "position", "recruit", "hiring"]
@@ -160,6 +184,56 @@ def get_body(msg):
     text = re.sub(r"<(script|style).*?</\1>", " ", text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     return unescape(text)
+
+
+def get_html(msg):
+    out = []
+    for part in msg.walk():
+        if part.get_content_type() != "text/html":
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        try:
+            out.append(payload.decode(part.get_content_charset() or "utf-8",
+                                      errors="replace"))
+        except LookupError:
+            out.append(payload.decode("utf-8", errors="replace"))
+    return "\n".join(out)
+
+
+def find_posting_link(msg, role):
+    """Return the job-posting link in the email, if there is one."""
+    html = get_html(msg)
+    if not html:
+        return None
+    anchors = re.findall(r'<a\b[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+                         html, flags=re.S | re.I)
+    links = []
+    for href, label in anchors:
+        href = unescape(href).strip()
+        if not href.lower().startswith("http"):
+            continue
+        label = " ".join(unescape(re.sub(r"<[^>]+>", " ", label)).split())
+        links.append((href, label))
+    if role:
+        for href, label in links:
+            if norm(label) and norm(label) == norm(role):
+                return href
+    for href, _ in links:
+        low = href.lower()
+        if any(h in low for h in JOB_LINK_HINTS) and \
+                not any(x in low for x in ("unsubscribe", "privacy", "settings")):
+            return href
+    return None
+
+
+def email_text(body):
+    lines = [" ".join(line.split()) for line in body.splitlines()]
+    text = "\n".join(line for line in lines if line)
+    if len(text) > EMAIL_TEXT_LIMIT:
+        text = text[:EMAIL_TEXT_LIMIT] + " …"
+    return text
 
 
 def classify(subject, body):
@@ -294,6 +368,31 @@ def stamp(dt):
 
 
 # ------------------------- google sheet --------------------------------
+def move_emails(imap, uids, folder):
+    """Move the given emails out of the inbox into `folder`."""
+    if not uids or not folder:
+        return
+    quoted = '"' + folder.replace('"', "") + '"'
+    imap.create(quoted)                   # fails harmlessly if it exists
+    imap.select(MAILBOX)                  # read-write, needed to move
+    uid_set = ",".join(str(u) for u in uids)
+    caps = set(imap.capabilities)
+    if "MOVE" in caps:
+        typ, data = imap.uid("MOVE", uid_set, quoted)
+    elif "UIDPLUS" in caps:
+        typ, data = imap.uid("COPY", uid_set, quoted)
+        if typ == "OK":
+            imap.uid("STORE", uid_set, "+FLAGS", r"(\Deleted)")
+            typ, data = imap.uid("EXPUNGE", uid_set)
+    else:
+        typ, data = imap.uid("COPY", uid_set, quoted)
+        print("Server can't move safely; emails were copied, not moved.")
+    if typ == "OK":
+        print(f"Moved {len(uids)} email(s) to {folder}.")
+    else:
+        print(f"Could not move emails to {folder}: {data}")
+
+
 def google_client():
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     if not raw:
@@ -325,6 +424,40 @@ def save_state(ws, last_uid, uidvalidity):
               values=[["last_uid", str(last_uid)], ["uidvalidity", uidvalidity]])
 
 
+class EmailLog:
+    """Copies job emails into the Emails tab."""
+
+    def __init__(self, sh):
+        ws = optional_tab(sh, EMAILS_TAB)
+        if ws is None:
+            ws = sh.add_worksheet(title=EMAILS_TAB, rows=200,
+                                  cols=len(EMAIL_HEADERS))
+            ws.update(range_name="A1", values=[EMAIL_HEADERS])
+            try:
+                ws.freeze(rows=1)
+            except Exception:
+                pass
+        self.ws = ws
+        self.next_row = len(ws.col_values(1)) + 1
+        self.rows = []
+
+    def add(self, values):
+        self.rows.append(values)
+        return self.next_row + len(self.rows) - 1
+
+    def link(self, r):
+        return f'=HYPERLINK("#gid={self.ws.id}&range=A{r}", "View email")'
+
+    def save(self):
+        if not self.rows:
+            return
+        last = self.next_row + len(self.rows) - 1
+        if last > self.ws.row_count:
+            self.ws.add_rows(last - self.ws.row_count + 100)
+        self.ws.update(range_name=f"A{self.next_row}", values=self.rows,
+                       value_input_option="RAW")
+
+
 class Tracker:
     """Loads the Tracker tab once, edits it in memory, writes changes in bulk."""
 
@@ -341,6 +474,9 @@ class Tracker:
                 sys.exit(f'Column "{name}" not found in the {SHEET_NAME} tab.')
             self.col[key] = header.index(name)
 
+        for key, name in OPTIONAL_COLUMNS.items():
+            if name in header:
+                self.col[key] = header.index(name)
         self.people_cols = [header.index(c) for c in PEOPLE_COLUMNS if c in header]
         self.width = max(len(r) for r in self.rows)
         for row in self.rows:
@@ -349,6 +485,9 @@ class Tracker:
         self.changes = {}       # (row, col) 1-based -> value, Tracker tab
         self.mirror = {}        # (row, col) 1-based -> value, _StatusTracker
         self.history = []       # rows for StatusHistory
+
+    def has(self, key):
+        return key in self.col
 
     def get(self, r, key):
         return self.rows[r][self.col[key]].strip()
@@ -430,6 +569,7 @@ def main():
 
     sh = google_client().open_by_key(spreadsheet_id)
     tracker = Tracker(sh)
+    log = EmailLog(sh)
     state_ws, state = load_state(sh)
 
     imap = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
@@ -453,6 +593,7 @@ def main():
     print(f"{len(uids)} new emails, checking {len(batch)} this run.")
 
     added = updated = 0
+    to_move = []
     for uid in batch:
         last_uid = uid
         _, fetched = imap.uid("fetch", str(uid), "(RFC822)")
@@ -471,6 +612,7 @@ def main():
         status = classify(subject, body)
         if not status:
             continue
+        to_move.append(uid)
 
         company = guess_company(subject, display_name, addr, body) or "(unknown)"
         role = guess_role(subject, body)
@@ -496,12 +638,30 @@ def main():
             added += 1
             print(f"Added:   {company} ({role or 'role unknown'}) -> {status}")
 
-    imap.logout()
+        # Keep a copy of the email and link it from the Tracker row.
+        email_row = log.add([stamp(email_datetime(msg)), tracker.get(row, "company"),
+                             tracker.get(row, "role"), status,
+                             f"{display_name} <{addr}>".strip(), subject,
+                             email_text(body)])
+        if tracker.has("email"):
+            tracker.set(row, "email", log.link(email_row))
+        if tracker.has("link") and not tracker.get(row, "link"):
+            link = find_posting_link(msg, role or tracker.get(row, "role"))
+            if link:
+                tracker.set(row, "link", link)
 
+    # Save to the sheet first, so an email is only moved once it's recorded.
+    log.save()
     if tracker.changes:
         tracker.save()
     save_state(state_ws, last_uid, uidvalidity)
     print(f"Done. {added} added, {updated} updated.")
+
+    try:
+        move_emails(imap, to_move, MOVE_TO_FOLDER)
+    except Exception as exc:  # never fail the run just because of moving
+        print(f"Could not move emails: {exc}")
+    imap.logout()
 
 
 if __name__ == "__main__":
