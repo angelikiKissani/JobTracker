@@ -395,7 +395,8 @@ def main():
         since_str = f"{since.day:02d}-{MONTHS[since.month - 1]}-{since.year}"
         _, data = imap.uid("search", None, f'(SINCE "{since_str}")')
 
-    uids = sorted(int(u) for u in data[0].split() if int(u) > last_uid)
+    uids = sorted(int(u) for u in ((data[0] or b"").split() if data else [])
+                  if int(u) > last_uid)
     batch = uids[:MAX_PER_RUN]
     print(f"{len(uids)} new emails, checking {len(batch)} this run.")
 
