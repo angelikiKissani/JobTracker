@@ -40,7 +40,8 @@ def _decode_part(part: Message) -> str | None:
     if payload is None:
         return None
     try:
-        return payload.decode(part.get_content_charset() or "utf-8", errors="replace") #try decoding to read the email 
+        return payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        #try decoding to read the email 
     except LookupError:  # unknown or unusual encoding name
         return payload.decode("utf-8", errors="replace") 
 
