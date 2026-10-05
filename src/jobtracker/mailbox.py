@@ -89,3 +89,27 @@ class Mailbox:
             self.imap.logout()
         except Exception:
             pass
+
+
+
+
+    # all emails in a folder from the last days (used by the backfill)
+    def uids_since(self, folder: str, days: int) -> list[int]:
+        quoted = '"' + folder.replace('"', "") + '"'
+        typ, _ = self.imap.select(quoted, readonly=True)
+        if typ != "OK":
+            print(f"Folder {folder!r} not found, skipping it.")
+            return []
+        since = datetime.now() - timedelta(days=days)
+        _, data = self.imap.uid("search", None, f'(SINCE "{imap_date(since)}")')
+        raw = (data[0] or b"").split() if data else []
+        return sorted(int(u) for u in raw)
+
+    # download many emails, chunk per request, which is much faster than one by one
+    def fetch_many(self, uids: list[int], chunk: int = config.FETCH_CHUNK):
+        for i in range(0, len(uids), chunk):
+            uid_set = ",".join(str(u) for u in uids[i:i + chunk])
+            _, fetched = self.imap.uid("fetch", uid_set, "(RFC822)")
+            for part in fetched or []:
+                if isinstance(part, tuple) and part[1]:
+                    yield email.message_from_bytes(part[1])
