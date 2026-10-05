@@ -17,7 +17,7 @@ def is_job_related(subject: str, body: str) -> bool:
 
 
 def classify(subject: str, body: str) -> str | None:
-    """Return the status an email implies, or None if it implies none."""
+    # find the status
     subj, full = subject.lower(), (subject + " " + body).lower()
     for status, anywhere, subject_only in config.STATUS_RULES:
         if any(p in full for p in anywhere) or any(p in subj for p in subject_only):
@@ -26,7 +26,7 @@ def classify(subject: str, body: str) -> str | None:
 
 
 def same_company(a: str, b: str) -> bool:
-    """Loose match: 'Aegean' matches 'Aegeanair', 'Satori' matches 'Satori Analytics'."""
+    # Loose match, find company
     a, b = norm(a), norm(b)
     if not a or not b:
         return False
@@ -37,6 +37,7 @@ def same_company(a: str, b: str) -> bool:
 
 
 def apply_alias(company: str | None) -> str | None:
+  # find company alias
     if not company:
         return company
     for alias, real in config.COMPANY_ALIASES.items():
@@ -46,7 +47,7 @@ def apply_alias(company: str | None) -> str | None:
 
 
 def domain_company(addr: str) -> str | None:
-    """Company name from the sender's domain, unless it's a platform/provider."""
+    # find domain
     domain = addr.split("@")[-1].lower()
     if any(domain == g or domain.endswith("." + g) for g in config.GENERIC_DOMAINS):
         return None
@@ -61,6 +62,7 @@ def domain_company(addr: str) -> str | None:
 
 
 def clean_display_name(name: str) -> str:
+  # clean the name of the company
     for sep in (" from ", " at ", " via "):
         if sep in name.lower():
             idx = name.lower().index(sep)
@@ -73,7 +75,7 @@ def clean_display_name(name: str) -> str:
 
 
 def subject_dash_split(subject: str) -> tuple[str | None, str | None]:
-    """'Python Developer - Satori Analytics' -> ('Python Developer', 'Satori Analytics')."""
+    # regex find company and position Job Title - Company
     m = re.match(r"^\s*(.{3,80}?)\s+[-–|]\s+(.{2,60}?)\s*$", subject)
     if not m:
         return None, None
@@ -139,7 +141,6 @@ def guess_role(subject: str, body: str = "") -> str | None:
 
 
 def find_posting_link(msg: Message, role: str | None) -> str | None:
-    """Return the job-posting link in the email, if there is one."""
     html = get_html(msg)
     if not html:
         return None
