@@ -1,4 +1,4 @@
-"""The main flow: read new emails, understand them, update the sheet."""
+"""MAIN FLOW: read new emails, understand them, update the sheet."""
 
 import os
 from collections import Counter
@@ -22,7 +22,7 @@ from .sheets import EmailLog, Tracker
 
 @dataclass
 class Result:
-    """What happened to one email."""
+    # RESULT OF EACH EMAIL
     action: str            # "added", "updated", "unchanged" or "skipped"
     subject: str = ""
     company: str = ""
@@ -34,9 +34,11 @@ class Result:
 
     @property
     def is_job_email(self) -> bool:
+        # IF its a job email do not skip
         return self.action != "skipped"
 
     def describe(self) -> str:
+        # describe action of the email
         if self.action == "added":
             return f"Added:   {self.company} ({self.role or 'role unknown'}) -> {self.status}"
         if self.action == "updated":
@@ -49,23 +51,14 @@ class Result:
 
 def understand(msg: Message, subject: str, display_name: str, addr: str, body: str,
                tracker: Tracker, ai_client=None) -> tuple[dict | None, str]:
-    """Extract details with AI if available, else with rules.
-
-    Returns (details, read_by). details is None when the email isn't an
-    application update.
+    """Extract details with rules.
+    Returns (details, read_by). 
+    details is None when the email isn't an application update.
     """
-    if ai_client is not None:
-        info = ai_module.read_email(ai_client, subject, f"{display_name} <{addr}>",
-                                    msg.get("Date", ""), body, tracker.known_jobs())
-        if info is not None:
-            if not info.get("is_application_update"):
-                return None, "AI"
-            info["status"] = info.get("status") or classify(subject, body)
-            info["company"] = apply_alias(info.get("company")) or \
-                guess_company(subject, display_name, addr, body)
-            info["job_title"] = info.get("job_title") or guess_role(subject, body)
-            return (info if info["status"] else None), "AI"
-
+    #classify -> 
+    #guess_company ->                 
+    #guess_role
+                   
     status = classify(subject, body)
     if not status:
         return None, "Rules"
@@ -76,11 +69,21 @@ def understand(msg: Message, subject: str, display_name: str, addr: str, body: s
 
 def process_message(msg: Message, tracker: Tracker, log: EmailLog,
                     ai_client=None) -> Result:
-    """Handle one email: update the Tracker and copy it to the Emails tab."""
+    # Handle one email
+    # update the Tracker and copy it to the Emails tab 
+
+    #STEPS:
+    #decode   -> 
+    #parseaddr (email.utils) + decode->                         
+    #get_body  -> 
+    #understand  (classify, guess_company, guess_role)-> 
+    #RETURN INFO AND GET STATUS, COMPANY, ROLE, ROW  -> 
+                        
     subject = decode(msg.get("Subject"))
     display_name, addr = parseaddr(decode(msg.get("From")))
     body = get_body(msg)
-
+    
+    # action skipped if its not job related 
     if not is_job_related(subject, body):
         return Result("skipped", subject, reason="not job-related")
     info, read_by = understand(msg, subject, display_name, addr, body, tracker, ai_client)
@@ -93,6 +96,7 @@ def process_message(msg: Message, tracker: Tracker, log: EmailLog,
     role = info.get("job_title")
     row = tracker.find_by_person(display_name, addr) or tracker.find_row(company, role)
 
+    #UPDATE  action = "updated" or unchanged OR ADD NEW JOB APPLICATION
     if row:
         old = tracker.get(row, "status")
         if role and tracker.get(row, "role") in ("", config.PLACEHOLDER_ROLE):
@@ -140,7 +144,6 @@ def _record_email(msg, tracker, log, row, status, info, read_by, sender, subject
 
 
 def run() -> None:
-    """One full run, as executed hourly by GitHub Actions."""
     from . import sheets
     from .mailbox import Mailbox
 
