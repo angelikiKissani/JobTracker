@@ -1,6 +1,6 @@
 import hashlib
-from email.Message import Message   
-from email.Utils import parseaddr
+from email.message import Message   
+from email.utils import parseaddr
 
 
 from . import config 
