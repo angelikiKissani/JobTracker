@@ -142,19 +142,46 @@ def _record_email(msg, tracker, log, row, status, info, read_by, sender, subject
         tracker.set(row, "location", info["location"])
 
 
-def run() -> None:
-    from . import sheets
-    from .mailbox import Mailbox
+# def run() -> None:
+    # from . import sheets
+    # from .mailbox import Mailbox
+
+    # user = (os.environ.get("ICLOUD_EMAIL") or "").strip()
+    # password = (os.environ.get("ICLOUD_APP_PASSWORD") or "").strip().replace(" ", "")
+    # spreadsheet_id = (os.environ.get("SPREADSHEET_ID") or "").strip()
+    # if not user or not password or not spreadsheet_id:
+    #     raise SystemExit("Missing ICLOUD_EMAIL, ICLOUD_APP_PASSWORD or SPREADSHEET_ID secret.")
+
+    # sh = sheets.open_spreadsheet(spreadsheet_id)
+    # tracker = Tracker.load(sh)
+    # log = EmailLog.load(sh)
+
+
+def read_credentials() -> tuple[str, str, str]:
 
     user = (os.environ.get("ICLOUD_EMAIL") or "").strip()
     password = (os.environ.get("ICLOUD_APP_PASSWORD") or "").strip().replace(" ", "")
     spreadsheet_id = (os.environ.get("SPREADSHEET_ID") or "").strip()
     if not user or not password or not spreadsheet_id:
         raise SystemExit("Missing ICLOUD_EMAIL, ICLOUD_APP_PASSWORD or SPREADSHEET_ID secret.")
+    return user, password, spreadsheet_id
 
+
+def run() -> None:
+    from . import sheets
+    from .dataset import build_row
+    from .mailbox import Mailbox
+
+    user, password, spreadsheet_id = read_credentials()
     sh = sheets.open_spreadsheet(spreadsheet_id)
     tracker = Tracker.load(sh)
     log = EmailLog.load(sh)
+    dataset = sheets.DatasetSheet.load(sh)   
+
+
+
+
+
     state_ws, state = sheets.load_state(sh)
     ai_client = ai_module.make_client()
     print("AI email understanding: " + ("on" if ai_client else "off (keyword rules)"))
@@ -172,7 +199,10 @@ def run() -> None:
         msg = box.fetch(uid)
         if msg is None:
             continue
-        result = process_message(msg, tracker, log, ai_client)
+        result = process_message(msg, tracker, log)
+        row = build_row(msg, config.MAILBOX)  
+        if row:
+            dataset.add(row)
         counts[result.action] += 1
         if result.is_job_email:
             to_move.append(uid)
@@ -181,6 +211,7 @@ def run() -> None:
 
     # Save to the sheet first, so an email is only moved once it's recorded.
     log.save()
+    dataset.save()
     tracker.save()
     sheets.save_state(state_ws, last_uid, box.uidvalidity)
     print(f"Done. {counts['added']} added, {counts['updated']} updated, "
