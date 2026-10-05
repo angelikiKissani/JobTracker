@@ -1,4 +1,4 @@
-"""Turning raw email messages into clean text."""
+"""Turning raw email messages into clean text"""
 
 import re
 from datetime import datetime
@@ -11,7 +11,7 @@ from . import config
 
 
 def decode(value: str | None) -> str:
-    """Decode an encoded email header (e.g. '=?utf-8?...') into plain text."""
+    # Decode into plain text
     try:
         return str(make_header(decode_header(value or ""))).strip()
     except Exception:
@@ -19,29 +19,30 @@ def decode(value: str | None) -> str:
 
 
 def norm(text) -> str:
-    """Lowercase and keep only letters/digits, for loose comparisons."""
+    # Lowercase and keep only letters and digits
     return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
 
 
 def flat(text: str | None) -> str:
-    """Collapse all whitespace (including newlines) into single spaces."""
+    # make all whitespace and newlines into single spaces.
     return " ".join((text or "").split())
 
 
 def flat_lines(text: str | None) -> str:
-    """Collapse whitespace within lines and drop empty lines."""
+    # whitespace within lines, drop empty lines
     lines = [" ".join(line.split()) for line in (text or "").splitlines()]
     return "\n".join(line for line in lines if line)
 
 
 def _decode_part(part: Message) -> str | None:
+    # decode each part 
     payload = part.get_payload(decode=True)
     if payload is None:
         return None
     try:
-        return payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        return payload.decode(part.get_content_charset() or "utf-8", errors="replace") #try decoding to read the email 
     except LookupError:  # unknown or unusual encoding name
-        return payload.decode("utf-8", errors="replace")
+        return payload.decode("utf-8", errors="replace") 
 
 
 def html_to_text(html: str) -> str:
@@ -52,7 +53,7 @@ def html_to_text(html: str) -> str:
 
 
 def get_body(msg: Message) -> str:
-    """Return the email's text, preferring the plain-text version."""
+    # Return the email's text 
     plain, html = [], []
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
@@ -72,7 +73,7 @@ def get_body(msg: Message) -> str:
 
 
 def get_html(msg: Message) -> str:
-    """Return the email's raw HTML (empty if it has none)."""
+    # Return the email's raw HTML  
     out = []
     for part in msg.walk():
         if part.get_content_type() == "text/html":
@@ -83,7 +84,7 @@ def get_html(msg: Message) -> str:
 
 
 def email_text(body: str, limit: int = config.EMAIL_TEXT_LIMIT) -> str:
-    """Tidy email text for storing in the sheet, truncated to `limit` characters."""
+    # use flat_lines and check the limit if it's too long add ...
     text = flat_lines(body)
     if len(text) > limit:
         text = text[:limit] + " …"
