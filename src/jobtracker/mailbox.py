@@ -36,7 +36,8 @@ class Mailbox:
     def new_uids(self, last_uid: int, saved_uidvalidity: str) -> tuple[list[int], int]:
         
         if last_uid and saved_uidvalidity == self.uidvalidity:
-            _, data = self.imap.uid("search", None, f"UID {last_uid + 1}:*") #asks the server for every email from the next UID onwards
+            _, data = self.imap.uid("search", None, f"UID {last_uid + 1}:*") 
+                  #asks the server for every email from the next UID onwards
         else:
             #fisrt run
             last_uid = 0
@@ -46,14 +47,16 @@ class Mailbox:
               
         # read the result, the server replies with UIDs in one block of bytes, such as [b"101 102 105"]
         # This takes that block, splits it into [b"101", b"102", b"105"]
-        raw = (data[0] or b"").split() if data else [] # read the result, the server replies with UIDs in one block of bytes, such as [b"101 102 105"]
+        raw = (data[0] or b"").split() if data else [] 
+        # read the result, the server replies with UIDs in one block of bytes, such as [b"101 102 105"]
         return sorted(int(u) for u in raw if int(u) > last_uid), last_uid
 
     # download one email
     def fetch(self, uid: int) -> Message | None:
         _, fetched = self.imap.uid("fetch", str(uid), "(RFC822)")
               
-        # The actual email is the second item of the tuple. This line goes through the reply, finds the first tuple, takes its email bytes
+        # The actual email is the second item of the tuple. 
+# This line goes through the reply, finds the first tuple, takes its email bytes
         raw = next((p[1] for p in fetched if isinstance(p, tuple)), None)
         return email.message_from_bytes(raw) if raw else None
 
