@@ -28,7 +28,7 @@ OPTIONAL_COLUMNS = {
 }
 
 # If an email comes from a person listed in one of these columns,
-# it is matched to that row (e.g. your interviewer at a company).
+# it is matched to that row (interviewer at a company).
 PEOPLE_COLUMNS = ["Contact", "Interviewer"]
 
 EMAIL_HEADERS = [
@@ -42,18 +42,13 @@ TIMEZONE = ZoneInfo("Europe/Athens")
 # --------------------------------------------------------------------------
 # Mailbox
 # --------------------------------------------------------------------------
+# The Application updates will be moved to folder Applications
 IMAP_SERVER = "imap.mail.me.com"
 IMAP_PORT = 993
 MAILBOX = "INBOX"
-MOVE_TO_FOLDER = "Applications"  # set to None to keep job emails in the inbox
+MOVE_TO_FOLDER = "Applications" 
 DAYS_BACK_FIRST_RUN = 30
 MAX_PER_RUN = 300
-
-# --------------------------------------------------------------------------
-# AI email understanding (optional, used only if ANTHROPIC_API_KEY is set)
-# --------------------------------------------------------------------------
-AI_MODEL = "claude-haiku-4-5-20251001"
-AI_BODY_LIMIT = 6000  # characters of each email sent to the AI
 
 # --------------------------------------------------------------------------
 # Rule-based extraction
@@ -86,7 +81,7 @@ STATUS_RULES = [
 ]
 STATUSES = ["Applied", "Recruiter Screen", "Interview", "Offer", "Rejected"]
 
-# Higher rank wins; an email never moves a job "backwards".
+# Higher rank wins, an email never moves a job "backwards"
 STATUS_RANK = {"": 0, "Pending": 0, "Ghosted": 0, "Applied": 1,
                "Recruiter Screen": 2, "Interview": 3, "Offer": 4,
                "Rejected": 4, "Dropped": 5}
@@ -96,7 +91,7 @@ COMPANY_ALIASES = {
     "eurodyn": "European Dynamics",
 }
 
-# Senders on these domains are job platforms or personal mail providers.
+# Job platforms or personal mail providers
 GENERIC_DOMAINS = [
     "greenhouse.io", "greenhouse-mail.io", "lever.co", "myworkday.com",
     "workday.com", "smartrecruiters.com", "icims.com", "ashbyhq.com",
@@ -109,12 +104,12 @@ GENERIC_DOMAINS = [
     "icloud.com", "me.com",
 ]
 
-# Sender names of job platforms; never treated as the company.
+# Sender names of job platforms; NEVER treated as the company.
 PLATFORM_NAMES = ["indeed", "indeed apply", "workable", "linkedin",
                   "linkedin jobs", "greenhouse", "lever", "smartrecruiters",
                   "teamtailor", "glassdoor", "kariera", "skywalker", "jobfind"]
 
-# Links in an email that point to a job posting on these sites.
+# Links in an email that POINTS TO A JOB POSTING -> GET JOB LINK
 JOB_LINK_HINTS = ["workable.com/j/", "apply.workable.com", "indeed.com/viewjob",
                   "indeed.com/rc/clk", "indeed.com/pagead", "linkedin.com/jobs/view",
                   "boards.greenhouse.io", "jobs.lever.co", "smartrecruiters.com/",
