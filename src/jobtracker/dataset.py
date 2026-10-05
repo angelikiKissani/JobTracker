@@ -1,9 +1,8 @@
 import hashlib
-from email.message import Message   
+from email.message import Message
 from email.utils import parseaddr
 
-
-from . import config 
+from . import config
 from .extract import classify, is_job_related
 from .parsing import decode, email_datetime, email_text, get_body, stamp
 
