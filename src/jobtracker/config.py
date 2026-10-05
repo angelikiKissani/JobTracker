@@ -116,3 +116,15 @@ JOB_LINK_HINTS = ["workable.com/j/", "apply.workable.com", "indeed.com/viewjob",
                   "teamtailor.com/jobs", "kariera.gr/jobs"]
 
 PLACEHOLDER_ROLE = "(check email)"
+
+
+
+
+# DATASETS 
+DATASET_TAB = "Dataset"
+DATASET_HEADERS = ["Email ID", "Date", "Folder", "From", "Subject", "Text",
+                   "Rule Label", "Label", "Reviewed"]
+NOT_UPDATE = "Not an update"  # label for job-related emails that aren't updates
+LABELS = STATUSES + [NOT_UPDATE]
+BACKFILL_DAYS = 180           # default for the backfill workflow
+FETCH_CHUNK = 50              # emails downloaded per IMAP request in the backfill
