@@ -1,4 +1,4 @@
-"""All tunable settings in one place."""
+"""ALL SETTINGS"""
 
 from zoneinfo import ZoneInfo
 
