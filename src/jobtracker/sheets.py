@@ -218,3 +218,78 @@ class EmailLog:
             self.ws.add_rows(last - self.ws.row_count + 100)
         self.ws.update(range_name=f"A{self.next_row}", values=self.rows,
                        value_input_option="RAW")
+
+
+# --------------------------------------------------------------------------
+# Dataset tab: labelled emails for machine learning
+# --------------------------------------------------------------------------
+class DatasetSheet:
+    # __init__: the in-memory state
+    def __init__(self, ws=None, existing_ids=(), next_row: int = 2):
+        self.ws, self.next_row = ws, next_row
+        self.ids = set(existing_ids)
+        self.rows: list[list] = []
+
+
+    # load: open the tab, or create it the first time
+    @classmethod
+    def load(cls, sh) -> "DatasetSheet":
+        ws = optional_tab(sh, config.DATASET_TAB)
+        if ws is None:
+            ws = sh.add_worksheet(title=config.DATASET_TAB, rows=500,
+                                  cols=len(config.DATASET_HEADERS))
+            ws.update(range_name="A1", values=[config.DATASET_HEADERS])
+            _add_label_controls(sh, ws)
+            try:
+                ws.freeze(rows=1)
+            except Exception:
+                pass
+        ids = ws.col_values(1)
+        return cls(ws, ids[1:], len(ids) + 1)
+
+    # add: queue a row, skipping duplicates
+    def add(self, row: list) -> bool:
+        # check id if its not added then queue row
+        if row[0] in self.ids:
+            return False
+        self.ids.add(row[0])
+        self.rows.append(row)
+        return True
+
+    # save: write everything in one request
+    def save(self) -> None:
+        if self.ws is None or not self.rows:
+            return
+        last = self.next_row + len(self.rows) - 1
+        if last > self.ws.row_count:
+            self.ws.add_rows(last - self.ws.row_count + 200)
+        # RAW: email text is stored as-is, never interpreted as a formula
+        self.ws.update(range_name=f"A{self.next_row}", values=self.rows,
+                       value_input_option="RAW")
+
+
+
+
+# _add_label_controls: the dropdown and checkboxes
+def _add_label_controls(sh, ws) -> None:
+    label_col = config.DATASET_HEADERS.index("Label")
+    reviewed_col = config.DATASET_HEADERS.index("Reviewed")
+
+    # startRowIndex: 1 skips the header row
+    #one whole column below the header
+    def column(c):
+        return {"sheetId": ws.id, "startRowIndex": 1,
+                "startColumnIndex": c, "endColumnIndex": c + 1}
+
+
+    # make this column a dropdown
+    sh.batch_update({"requests": [
+        # ONE_OF_LIST -> label_col ,only allow one of these options
+        {"setDataValidation": {"range": column(label_col), "rule": {
+            "condition": {"type": "ONE_OF_LIST",
+                          "values": [{"userEnteredValue": v} for v in config.LABELS]},
+            "strict": True, "showCustomUi": True}}},
+        # BOOLEAN ->reviewed_col  ,true or false, shown as a checkbox
+        {"setDataValidation": {"range": column(reviewed_col), "rule": {
+            "condition": {"type": "BOOLEAN"}}}},
+    ]})
