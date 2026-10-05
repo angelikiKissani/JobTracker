@@ -9,7 +9,6 @@ from email.utils import parseaddr
 from . import ai as ai_module
 from . import config
 from .extract import (
-    apply_alias,
     classify,
     find_posting_link,
     guess_company,
