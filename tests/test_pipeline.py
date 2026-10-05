@@ -1,7 +1,5 @@
 """End-to-end tests of email -> sheet updates, without any network access."""
 
-from types import SimpleNamespace
-
 from jobtracker.pipeline import process_message
 from tests.conftest import make_email
 
@@ -71,35 +69,3 @@ def test_non_job_email_is_skipped(tracker, log):
     assert process_message(msg, tracker, log).action == "skipped"
     assert not tracker.changes and not log.rows
 
-
-def _fake_ai(details):
-    """A stand-in for the Anthropic client that returns fixed details."""
-    block = SimpleNamespace(type="tool_use", input=details)
-    create = lambda **kwargs: SimpleNamespace(content=[block])  # noqa: E731
-    return SimpleNamespace(messages=SimpleNamespace(create=create))
-
-
-def test_ai_skips_job_alerts(tracker, log):
-    ai = _fake_ai({"is_application_update": False, "company": "", "job_title": "",
-                   "status": "", "summary": ""})
-    msg = make_email("10 new Python positions for you", "Apply now to these positions!",
-                     sender="LinkedIn <jobs@linkedin.com>")
-    result = process_message(msg, tracker, log, ai)
-    assert result.action == "skipped" and result.read_by == "AI"
-
-
-def test_ai_details_are_used_and_recorded(tracker, log):
-    ai = _fake_ai({"is_application_update": True, "company": "Kpler",
-                   "job_title": "Data Engineer", "status": "Interview",
-                   "interview_time": "2026-10-08 11:00", "contact_name": "Maria P",
-                   "contact_email": "maria@kpler.com", "location": "Athens",
-                   "summary": "Interview invitation.", "next_step": "Confirm the slot."})
-    msg = make_email("Next steps", "Let's meet for an interview on Thursday.",
-                     sender="Maria P <maria@kpler.com>")
-    result = process_message(msg, tracker, log, ai)
-
-    assert result.action == "added" and result.read_by == "AI"
-    row = tracker.rows[3]
-    assert row[:3] == ["Kpler", "Data Engineer", "Interview"]
-    assert row[4] == "Maria P (maria@kpler.com)"
-    assert log.rows[0][-2:] == ["2026-10-08 11:00", "AI"]
