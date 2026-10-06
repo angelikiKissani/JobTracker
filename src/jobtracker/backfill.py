@@ -27,7 +27,7 @@ def main(argv: list[str] | None=None) -> None:
     dataset = sheets.DatasetSheet.load(sh)
     box = Mailbox(user, password)
 
-    folders = [config.MAILBOX] + ([config.MOVE_TO_FOLDER] if config.MOVE_TO_FOLDER else [])
+    folders = config.BACKFILL_FOLDERS
     labels: Counter = Counter()
     
     for folder in folders:

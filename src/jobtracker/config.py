@@ -128,3 +128,5 @@ NOT_UPDATE = "Not an update"  # label for job-related emails that aren't updates
 LABELS = STATUSES + [NOT_UPDATE]
 BACKFILL_DAYS = 180           # default for the backfill workflow
 FETCH_CHUNK = 50              # emails downloaded per IMAP request in the backfill
+
+BACKFILL_FOLDERS = ["INBOX", "Applications", "Deleted Messages", "Archive"]
