@@ -1,0 +1,28 @@
+name: Build dataset (backfill)
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back to collect emails"
+        required: True
+        default: 180
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: job-tracker   # waits for the hourly run instead of editing the sheet at the same time
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: python -m jobtracker.backfill --days "${{ inputs.days }}"
+        env:
+          ICLOUD_EMAIL: ${{ secrets.ICLOUD_EMAIL }}
+          ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
