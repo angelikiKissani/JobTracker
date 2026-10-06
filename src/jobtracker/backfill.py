@@ -6,6 +6,7 @@ from .dataset import build_row
 from .mailbox import Mailbox
 from .pipeline import read_credentials
 
+
 def main(argv: list[str] | None=None) -> None:
 # read how many days to go back
 # log in and open the Dataset tab
