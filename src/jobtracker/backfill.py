@@ -1,3 +1,7 @@
+"""One-off collection of past emails into the Dataset tab.
+It only reads: the Tracker, the inbox and the Applications folder are not changed.
+"""
+
 import argparse
 from collections import Counter
 
