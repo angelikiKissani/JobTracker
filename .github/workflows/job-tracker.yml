@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install gspread
+      - run: pip install .
       - run: python -m jobtracker
         env:
           ICLOUD_EMAIL: ${{ secrets.ICLOUD_EMAIL }}
