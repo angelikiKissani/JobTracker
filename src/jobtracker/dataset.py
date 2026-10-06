@@ -9,7 +9,7 @@ from .parsing import decode, email_datetime, email_text, get_body, stamp
 
 def email_id(msg: Message) -> str :
     # stable email ID to avoid duplicates
-    key = (msg.get("Message-ID") or "").strip
+    key = (msg.get("Message-ID") or "").strip()
     if not key:
         key = "|".join(str(msg.get(h, "")) for h in ("From", "Date", "Subject"))
     return hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:16]
