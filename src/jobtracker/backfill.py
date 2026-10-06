@@ -4,6 +4,7 @@ from collections import Counter
 from .  import config, sheets
 from .dataset import build_row
 from .pipeline import read_credentials
+from .mailbox import Mailbox
 
 # read how many days to go back
 # log in and open the Dataset tab
