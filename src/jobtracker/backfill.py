@@ -5,6 +5,13 @@ from .  import config, sheets
 from .dataset import build_row
 from .pipeline import read_credentials
 
+# read how many days to go back
+# log in and open the Dataset tab
+# go through the inbox and the Applications folder
+# turn each job email into a row
+# save and print a summary.
+
+
 
 def main(argv: list[str] | None=None) -> None:
     parser = argparse.ArgumentParser(description = __doc__.splitlines()[0])
