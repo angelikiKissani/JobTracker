@@ -3,12 +3,8 @@ from collections import Counter
 
 from . import config, sheets
 from .dataset import build_row
-from .pipeline import read_credentials
 from .mailbox import Mailbox
-
-
-
-
+from .pipeline import read_credentials
 
 def main(argv: list[str] | None=None) -> None:
 # read how many days to go back
