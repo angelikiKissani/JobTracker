@@ -1,20 +1,21 @@
 import argparse
 from collections import Counter
 
-from .  import config, sheets
+from . import config, sheets
 from .dataset import build_row
 from .pipeline import read_credentials
 from .mailbox import Mailbox
 
+
+
+
+
+def main(argv: list[str] | None=None) -> None:
 # read how many days to go back
 # log in and open the Dataset tab
 # go through the inbox and the Applications folder
 # turn each job email into a row
 # save and print a summary.
-
-
-
-def main(argv: list[str] | None=None) -> None:
     parser = argparse.ArgumentParser(description = __doc__.splitlines()[0])
     parser.add_argument("--days",type = int, default = config.BACKFILL_DAYS, 
                         help = "how many days back to collect (default: %(default)s)")
