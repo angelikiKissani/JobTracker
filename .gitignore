@@ -13,3 +13,6 @@ dist/
 .env
 *service_account*.json
 credentials*.json
+
+
+data/
