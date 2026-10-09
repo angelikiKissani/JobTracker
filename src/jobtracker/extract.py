@@ -120,8 +120,8 @@ def guess_role(subject: str, body: str = "") -> str | None:
     subject_patterns = [
         r"(?:for|as)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:position|role|job|opening)\b",
         r"application(?:\s+\w+)?\s+for\s+(?:the\s+)?(.+?)(?:\s+(?:at|with)\s+|\s+[-–|]\s+|$)",
-        r"application(?:\s+\w+)?\s+as\s+(?:the\s+)?(.+?)(?:\s+(?:at|with)\s+|\s+[-–|]\s+|$)",
         r"(?:applying|applied)\s+(?:for|to)\s+(?:the\s+)?(.+?)\s+(?:at|with)\s+",
+        r"application\s+as\s+(?:an?\s+)?(.+?)(?:\s+(?:at|with)\s+|\s+[-–|]\s+|$)"
     ]
     for p in subject_patterns:
         m = re.search(p, subject, flags=re.I)
